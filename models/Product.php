@@ -7,8 +7,7 @@ class Product extends Model
 {
     protected static string $table = 'products';
 
-    /** Numeric FK; not a text column — also avoids SQL errors if DB predates this column */
-    protected static array $globalSearchSkip = ['category_id'];
+    protected static array $globalSearchSkip = ['category_id', 'gallery'];
 
     protected static array $fillable = [
         'category_id', 'name', 'tqb_code', 'oem_number', 'production_code', 'no_stock_purchase',
@@ -17,13 +16,28 @@ class Product extends Model
         'bca', 'skf', 'snr', 'timken', 'nsk', 'ntn', 'koyo',
         'dimensions', 'weight', 'inner_box_size', 'spline_teeth', 'cost',
         'original_category', 'stock_status', 'in_system', 'system_code', 'warehouse_a',
-        'image_path',
+        'gallery',
         'stock_qty', 'stock_max', 'stock_min',
         'supplier1', 'supplier1_price',
         'supplier2', 'supplier2_price',
         'supplier3', 'supplier3_price',
         'supplier4', 'supplier4_price',
     ];
+
+    /** Decode the gallery JSON column into an array of relative paths. */
+    public static function parseGallery(?string $json): array
+    {
+        if ($json === null || $json === '') return [];
+        $arr = json_decode($json, true);
+        return is_array($arr) ? array_values(array_filter($arr, fn($v) => is_string($v) && $v !== '')) : [];
+    }
+
+    /** Encode an array of relative paths into a gallery JSON string (or null if empty). */
+    public static function galleryJson(array $paths): ?string
+    {
+        $paths = array_values(array_filter($paths, fn($v) => is_string($v) && $v !== ''));
+        return empty($paths) ? null : json_encode($paths, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
 
     /**
      * Paginated search with LIKE filters.
@@ -47,7 +61,13 @@ class Product extends Model
         $totalPages = $perPage > 0 ? (int) ceil($total / $perPage) : 1;
         $page       = max(1, min($page, max($totalPages, 1)));
         $offset     = ($page - 1) * $perPage;
-        $rows       = static::all($clean, ['id' => 'ASC'], $perPage, $offset, $globalSearch);
+        $rows       = static::all(
+            $clean,
+            ['updated_at' => 'DESC', 'id' => 'DESC'],
+            $perPage,
+            $offset,
+            $globalSearch
+        );
         
         $categoryIds = array_filter(array_unique(array_column($rows, 'category_id')));
         if (!empty($categoryIds)) {

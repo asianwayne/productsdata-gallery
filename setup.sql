@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   `supplier4`         VARCHAR(100)     DEFAULT NULL COMMENT '备用供应商3',
   `supplier4_price`   VARCHAR(50)      DEFAULT NULL COMMENT '备用采购价3',
   `warehouse_a`       VARCHAR(50)      DEFAULT NULL COMMENT 'A仓可出数量',
-  `image_path`        VARCHAR(255)     DEFAULT NULL COMMENT '产品图片相对路径',
+  `gallery`           TEXT             DEFAULT NULL COMMENT '产品图片相对路径 (JSON 数组)',
   `created_at`        TIMESTAMP        DEFAULT CURRENT_TIMESTAMP,
   `updated_at`        TIMESTAMP        DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 

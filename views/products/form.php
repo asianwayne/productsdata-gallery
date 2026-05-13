@@ -3,17 +3,15 @@ $action = $isEdit
     ? '?c=product&a=update'
     : '?c=product&a=store';
 
-// Group columns by tab
 $tabs = [];
 foreach ($columns as $col) {
     $tabs[$col['tab']][] = $col;
 }
-$tabKeys   = array_keys($tabs);
-$firstTab  = $tabKeys[0] ?? '';
+$tabKeys  = array_keys($tabs);
+$firstTab = $tabKeys[0] ?? '';
 
-$currentImage = trim((string)($product['image_path'] ?? ''));
-$base         = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
-$imageUrl     = $currentImage !== '' ? ($base . '/' . ltrim($currentImage, '/')) : '';
+$gallery  = Product::parseGallery($product['gallery'] ?? null);
+$base     = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
 ?>
 
 <div class="d-flex align-items-center mb-3">
@@ -36,45 +34,58 @@ $imageUrl     = $currentImage !== '' ? ($base . '/' . ltrim($currentImage, '/'))
   <input type="hidden" name="id" value="<?= (int)$product['id'] ?>">
   <?php endif; ?>
 
-  <!-- Product Image -->
+  <!-- Product Gallery -->
   <div class="card border-0 shadow-sm mb-3">
     <div class="card-body py-3">
-      <div class="row g-3 align-items-start">
-        <div class="col-md-3 col-sm-4">
-          <label class="form-label fw-medium small mb-1">
-            <i class="bi bi-image text-primary me-1"></i>产品图片
-          </label>
-          <div id="imagePreviewWrap"
-               class="border rounded d-flex align-items-center justify-content-center bg-light"
-               style="width:100%;height:180px;overflow:hidden;">
-            <?php if ($imageUrl !== ''): ?>
-              <img id="imagePreview" src="<?= e($imageUrl) ?>" alt="产品图片"
-                   style="max-width:100%;max-height:100%;object-fit:contain;">
-            <?php else: ?>
-              <span id="imagePreviewEmpty" class="text-muted small">
-                <i class="bi bi-image fs-3 d-block text-center opacity-50"></i>暂无图片
-              </span>
-              <img id="imagePreview" src="" alt="" style="display:none;max-width:100%;max-height:100%;object-fit:contain;">
-            <?php endif; ?>
+      <label class="form-label fw-medium small mb-2">
+        <i class="bi bi-images text-primary me-1"></i>产品图片
+        <?php if (!empty($gallery)): ?>
+          <span class="badge bg-secondary ms-1"><?= count($gallery) ?></span>
+        <?php endif; ?>
+      </label>
+
+      <?php if (!empty($gallery)): ?>
+      <div class="gallery-grid mb-3" id="currentGallery">
+        <?php foreach ($gallery as $i => $rel): ?>
+        <div class="gallery-item" data-path="<?= e($rel) ?>">
+          <img src="<?= e($base . '/' . ltrim($rel, '/')) ?>" alt="图片 <?= $i + 1 ?>"
+               class="gallery-thumb">
+          <div class="gallery-item-actions">
+            <label class="gallery-remove-check" title="选中以删除">
+              <input type="checkbox" name="remove_gallery[]" value="<?= e($rel) ?>">
+              <i class="bi bi-trash"></i>
+            </label>
           </div>
+          <span class="gallery-index"><?= $i + 1 ?></span>
         </div>
-        <div class="col-md-9 col-sm-8">
-          <label class="form-label fw-medium small mb-1">上传 / 替换图片</label>
-          <input type="file" name="image" id="imageInput"
-                 accept="image/*"
-                 class="form-control form-control-sm">
-          <div class="form-text small">
-            支持 jpg / png / gif / webp，最大 8MB。文件名建议使用 TQB编码（如 <code>TQB0-0002.jpg</code>）。
-          </div>
-          <?php if ($isEdit && $imageUrl !== ''): ?>
-            <div class="form-check mt-2">
-              <input class="form-check-input" type="checkbox" id="removeImage" name="remove_image" value="1">
-              <label class="form-check-label small text-danger" for="removeImage">
-                <i class="bi bi-trash me-1"></i>删除当前图片
-              </label>
-            </div>
-          <?php endif; ?>
-        </div>
+        <?php endforeach; ?>
+      </div>
+      <?php if ($isEdit): ?>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" id="removeAllImages" name="remove_all_images" value="1">
+        <label class="form-check-label small text-danger" for="removeAllImages">
+          <i class="bi bi-trash me-1"></i>删除全部现有图片
+        </label>
+      </div>
+      <?php endif; ?>
+      <?php else: ?>
+      <div id="galleryEmpty" class="border rounded d-flex align-items-center justify-content-center bg-light mb-3"
+           style="height:120px;">
+        <span class="text-muted small">
+          <i class="bi bi-images fs-3 d-block text-center opacity-50"></i>暂无图片
+        </span>
+      </div>
+      <?php endif; ?>
+
+      <!-- New uploads preview -->
+      <div class="gallery-grid mb-2" id="newPreviewGrid" style="display:none;"></div>
+
+      <label class="form-label fw-medium small mb-1">上传新图片</label>
+      <input type="file" name="images[]" id="imageInput"
+             accept="image/*" multiple
+             class="form-control form-control-sm">
+      <div class="form-text small">
+        支持 jpg / png / gif / webp，最大 8MB / 张，可同时选择多张图片。
       </div>
     </div>
   </div>
@@ -160,25 +171,35 @@ function toggleNewCategory(select) {
     input.required = false;
   }
 }
-// Init on load
+
 document.addEventListener('DOMContentLoaded', function() {
   toggleNewCategory(document.getElementById('categorySelect'));
 
   var input = document.getElementById('imageInput');
-  if (input) {
-    input.addEventListener('change', function(e) {
-      var file = e.target.files && e.target.files[0];
-      if (!file) return;
-      var url = URL.createObjectURL(file);
-      var img = document.getElementById('imagePreview');
-      var empty = document.getElementById('imagePreviewEmpty');
-      if (img) {
-        img.src = url;
-        img.style.display = 'block';
+  var grid  = document.getElementById('newPreviewGrid');
+  if (input && grid) {
+    input.addEventListener('change', function() {
+      grid.innerHTML = '';
+      var files = input.files || [];
+      if (files.length === 0) { grid.style.display = 'none'; return; }
+      grid.style.display = 'grid';
+      for (var i = 0; i < files.length; i++) {
+        if (!files[i].type.startsWith('image/')) continue;
+        var div = document.createElement('div');
+        div.className = 'gallery-item gallery-item-new';
+        var img = document.createElement('img');
+        img.src = URL.createObjectURL(files[i]);
+        img.className = 'gallery-thumb';
+        img.alt = files[i].name;
+        var badge = document.createElement('span');
+        badge.className = 'gallery-index bg-success';
+        badge.textContent = '新';
+        div.appendChild(img);
+        div.appendChild(badge);
+        grid.appendChild(div);
       }
+      var empty = document.getElementById('galleryEmpty');
       if (empty) empty.style.display = 'none';
-      var rm = document.getElementById('removeImage');
-      if (rm) rm.checked = false;
     });
   }
 });

@@ -15,7 +15,7 @@ class ProductController extends Controller
         $this->columns = require ROOT . '/config/columns.php';
     }
 
-    // ?? List ??????????????????????????????????????????????????????????????????
+    // ── List ──────────────────────────────────────────────────────
 
     public function index(): void
     {
@@ -37,7 +37,7 @@ class ProductController extends Controller
         ]);
     }
 
-    // ?? Detail ????????????????????????????????????????????????????????????????
+    // ── Detail ────────────────────────────────────────────────────
 
     public function show(): void
     {
@@ -48,7 +48,7 @@ class ProductController extends Controller
         ]);
     }
 
-    // ?? Create ????????????????????????????????????????????????????????????????
+    // ── Create ────────────────────────────────────────────────────
 
     public function create(): void
     {
@@ -66,30 +66,29 @@ class ProductController extends Controller
         $this->requirePost();
         $data = $_POST['product'] ?? [];
         $data['category_id'] = $this->resolveCategory($data, $_POST['new_category_name'] ?? '');
-
-        // image_path is not user-editable via the text form
-        unset($data['image_path']);
+        unset($data['gallery']);
 
         $newId = Product::create($data);
 
-        // Handle optional product image upload
-        if ($newId && !empty($_FILES['image']['name'])) {
-            $err = ImageHelper::validate($_FILES['image']);
-            if ($err === null) {
+        if ($newId && !empty($_FILES['images'])) {
+            $files = ImageHelper::normalizeMulti($_FILES['images']);
+            $saved = [];
+            $prefix = ($data['tqb_code'] ?? '') !== '' ? $data['tqb_code'] : ('product_' . $newId);
+            foreach ($files as $f) {
+                if (ImageHelper::validate($f) !== null) continue;
                 try {
-                    $prefix = $data['tqb_code'] !== '' ? $data['tqb_code'] : ('product_' . $newId);
-                    $rel    = ImageHelper::save($_FILES['image'], $prefix, true);
-                    Product::update($newId, ['image_path' => $rel]);
-                } catch (Throwable $e) {
-                    // Swallow image errors; product is already created.
-                }
+                    $saved[] = ImageHelper::save($f, $prefix, true);
+                } catch (Throwable $e) { /* skip */ }
+            }
+            if (!empty($saved)) {
+                Product::update($newId, ['gallery' => Product::galleryJson($saved)]);
             }
         }
 
         $this->redirect($this->url(['c' => 'product', 'a' => 'index', 'msg' => 'created']));
     }
 
-    // ?? Edit ??????????????????????????????????????????????????????????????????
+    // ── Edit ──────────────────────────────────────────────────────
 
     public function edit(): void
     {
@@ -106,46 +105,49 @@ class ProductController extends Controller
     public function update(): void
     {
         $this->requirePost();
-        $id = (int) ($_POST['id'] ?? 0);
+        $id   = (int) ($_POST['id'] ?? 0);
         $data = $_POST['product'] ?? [];
         $data['category_id'] = $this->resolveCategory($data, $_POST['new_category_name'] ?? '');
-
-        // image_path is not user-editable via the text form
-        unset($data['image_path']);
+        unset($data['gallery']);
 
         $existing = Product::find($id);
+        $gallery  = $existing ? Product::parseGallery($existing['gallery'] ?? null) : [];
 
-        // Optional: remove the existing image
-        if (!empty($_POST['remove_image']) && $existing) {
-            ImageHelper::delete($existing['image_path'] ?? null);
-            $data['image_path'] = null;
-        }
-
-        // Optional: replace / set image via upload
-        if (!empty($_FILES['image']['name'])) {
-            $err = ImageHelper::validate($_FILES['image']);
-            if ($err === null) {
-                try {
-                    $prefix = ($data['tqb_code'] ?? '') !== ''
-                        ? $data['tqb_code']
-                        : ('product_' . $id);
-                    $rel = ImageHelper::save($_FILES['image'], $prefix, true);
-                    // Delete the old file once the new one is in place
-                    if ($existing) {
-                        ImageHelper::delete($existing['image_path'] ?? null);
-                    }
-                    $data['image_path'] = $rel;
-                } catch (Throwable $e) {
-                    // ignore; keep existing image
-                }
+        // Remove selected images
+        $removeList = $_POST['remove_gallery'] ?? [];
+        if (!empty($removeList) && is_array($removeList)) {
+            foreach ($removeList as $relPath) {
+                ImageHelper::delete($relPath);
+                $gallery = array_values(array_filter($gallery, fn($p) => $p !== $relPath));
             }
         }
 
+        // Remove ALL images
+        if (!empty($_POST['remove_all_images'])) {
+            foreach ($gallery as $p) {
+                ImageHelper::delete($p);
+            }
+            $gallery = [];
+        }
+
+        // Append new uploads
+        if (!empty($_FILES['images'])) {
+            $files  = ImageHelper::normalizeMulti($_FILES['images']);
+            $prefix = ($data['tqb_code'] ?? '') !== '' ? $data['tqb_code'] : ('product_' . $id);
+            foreach ($files as $f) {
+                if (ImageHelper::validate($f) !== null) continue;
+                try {
+                    $gallery[] = ImageHelper::save($f, $prefix, true);
+                } catch (Throwable $e) { /* skip */ }
+            }
+        }
+
+        $data['gallery'] = Product::galleryJson($gallery);
         Product::update($id, $data);
         $this->redirect($this->url(['c' => 'product', 'a' => 'show', 'id' => $id, 'msg' => 'updated']));
     }
 
-    // ?? Delete ????????????????????????????????????????????????????????????????
+    // ── Delete ────────────────────────────────────────────────────
 
     public function delete(): void
     {
@@ -153,7 +155,9 @@ class ProductController extends Controller
         $id = (int) ($_POST['id'] ?? 0);
         $existing = Product::find($id);
         if ($existing) {
-            ImageHelper::delete($existing['image_path'] ?? null);
+            foreach (Product::parseGallery($existing['gallery'] ?? null) as $p) {
+                ImageHelper::delete($p);
+            }
         }
         Product::delete($id);
         $this->redirect($this->url(['c' => 'product', 'a' => 'index', 'msg' => 'deleted']));
@@ -162,10 +166,11 @@ class ProductController extends Controller
     public function deleteAll(): void
     {
         $this->requirePost();
-        // Best-effort cleanup of stored image files
         $rows = Product::all([], ['id' => 'ASC'], 0, 0, '');
         foreach ($rows as $row) {
-            ImageHelper::delete($row['image_path'] ?? null);
+            foreach (Product::parseGallery($row['gallery'] ?? null) as $p) {
+                ImageHelper::delete($p);
+            }
         }
         Product::truncate();
         $this->redirect($this->url(['c' => 'product', 'a' => 'index', 'msg' => 'deleted_all']));
@@ -177,21 +182,49 @@ class ProductController extends Controller
         $id = (int) ($_POST['id'] ?? 0);
         $existing = Product::find($id);
         if ($existing) {
-            ImageHelper::delete($existing['image_path'] ?? null);
-            Product::update($id, ['image_path' => null]);
+            foreach (Product::parseGallery($existing['gallery'] ?? null) as $p) {
+                ImageHelper::delete($p);
+            }
+            Product::update($id, ['gallery' => null]);
         }
         $this->redirect($this->url(['c' => 'product', 'a' => 'edit', 'id' => $id, 'msg' => 'updated']));
     }
 
     /**
-     * AJAX: quick image upload from the product list (POST, returns JSON).
+     * AJAX: remove a single image from gallery (POST, returns JSON).
+     */
+    public function removeGalleryImage(): void
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->json(['ok' => false, 'error' => 'Invalid method'], 405);
+        }
+        $sessionToken = $_SESSION['csrf_token'] ?? '';
+        $requestToken = $_POST['_token'] ?? '';
+        if ($sessionToken === '' || !hash_equals($sessionToken, $requestToken)) {
+            $this->json(['ok' => false, 'error' => '请求令牌无效，请刷新页面后重试。'], 403);
+        }
+        $id   = (int) ($_POST['id'] ?? 0);
+        $path = $_POST['path'] ?? '';
+        $product = Product::find($id);
+        if (!$product) {
+            $this->json(['ok' => false, 'error' => '产品不存在'], 404);
+        }
+        $gallery = Product::parseGallery($product['gallery'] ?? null);
+        ImageHelper::delete($path);
+        $gallery = array_values(array_filter($gallery, fn($p) => $p !== $path));
+        Product::update($id, ['gallery' => Product::galleryJson($gallery)]);
+        $this->json(['ok' => true, 'gallery' => $gallery]);
+    }
+
+    /**
+     * AJAX: upload images to gallery (POST, returns JSON).
+     * Appends to existing gallery rather than replacing.
      */
     public function uploadImage(): void
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             $this->json(['ok' => false, 'error' => 'Invalid method'], 405);
         }
-        // CSRF check — return JSON so the JS error handler can surface it
         $sessionToken = $_SESSION['csrf_token'] ?? '';
         $requestToken = $_POST['_token'] ?? '';
         if ($sessionToken === '' || !hash_equals($sessionToken, $requestToken)) {
@@ -202,32 +235,49 @@ class ProductController extends Controller
         if (!$product) {
             $this->json(['ok' => false, 'error' => '产品不存在'], 404);
         }
-        if (empty($_FILES['image']['name'])) {
+
+        // Support both single file (name="image") and multi (name="images[]")
+        $files = [];
+        if (!empty($_FILES['images'])) {
+            $files = ImageHelper::normalizeMulti($_FILES['images']);
+        } elseif (!empty($_FILES['image']['name'])) {
+            $files = [$_FILES['image']];
+        }
+
+        if (empty($files)) {
             $this->json(['ok' => false, 'error' => '未选择文件']);
         }
-        $err = ImageHelper::validate($_FILES['image']);
-        if ($err !== null) {
-            $this->json(['ok' => false, 'error' => $err]);
+
+        $gallery = Product::parseGallery($product['gallery'] ?? null);
+        $prefix  = ($product['tqb_code'] ?? '') !== '' ? $product['tqb_code'] : ('product_' . $id);
+        $newUrls = [];
+        $base    = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
+
+        foreach ($files as $f) {
+            $err = ImageHelper::validate($f);
+            if ($err !== null) continue;
+            try {
+                $rel = ImageHelper::save($f, $prefix, true);
+                $gallery[] = $rel;
+                $newUrls[] = $base . '/' . ltrim($rel, '/');
+            } catch (Throwable $e) { /* skip */ }
         }
-        try {
-            $prefix = ($product['tqb_code'] ?? '') !== ''
-                ? $product['tqb_code']
-                : ('product_' . $id);
-            $rel = ImageHelper::save($_FILES['image'], $prefix, true);
-            ImageHelper::delete($product['image_path'] ?? null);
-            Product::update($id, ['image_path' => $rel]);
-            $base = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
-            $this->json([
-                'ok'   => true,
-                'url'  => $base . '/' . ltrim($rel, '/'),
-                'path' => $rel,
-            ]);
-        } catch (Throwable $e) {
-            $this->json(['ok' => false, 'error' => $e->getMessage()], 500);
+
+        if (empty($newUrls)) {
+            $this->json(['ok' => false, 'error' => '没有有效的图片文件']);
         }
+
+        Product::update($id, ['gallery' => Product::galleryJson($gallery)]);
+
+        $this->json([
+            'ok'      => true,
+            'url'     => $newUrls[0],
+            'urls'    => $newUrls,
+            'gallery' => array_map(fn($p) => $base . '/' . ltrim($p, '/'), $gallery),
+        ]);
     }
 
-    // ?? Export CSV ????????????????????????????????????????????????????????????
+    // ── Export CSV ────────────────────────────────────────────────
 
     public function export(): void
     {
@@ -242,13 +292,9 @@ class ProductController extends Controller
         header('Cache-Control: no-cache, no-store, must-revalidate');
 
         $out = fopen('php://output', 'w');
-        // UTF-8 BOM so Excel opens without garbled characters
         fwrite($out, "\xEF\xBB\xBF");
-
-        // Header row (Chinese labels)
         fputcsv($out, array_column($this->columns, 'label'));
 
-        // Data rows
         foreach ($rows as $row) {
             $line = [];
             foreach ($this->columns as $col) {
@@ -260,7 +306,7 @@ class ProductController extends Controller
         exit;
     }
 
-    // ?? Private helpers ???????????????????????????????????????????????????????
+    // ── Private helpers ───────────────────────────────────────────
 
     private function findOrRedirect(): array
     {

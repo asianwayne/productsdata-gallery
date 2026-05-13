@@ -32,6 +32,35 @@ body {
   color: #6c757d;
 }
 .table td { font-size: .875rem; }
+
+/* Long text columns (OEM numbers, car model) — capped width, wrap + line clamp, full text in title */
+.table .oem-number-col {
+  width: 11rem;
+  max-width: 11rem;
+  min-width: 0;
+  vertical-align: top;
+}
+.table .car-model-col {
+  width: 10rem;
+  max-width: 10rem;
+  min-width: 0;
+  vertical-align: top;
+}
+.table .long-text-cell {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  font-size: .8125rem;
+  cursor: default;
+}
+.table .long-text-cell--sm {
+  -webkit-line-clamp: 3;
+  font-size: .8rem;
+}
 .table-hover tbody tr:hover { background: #f0f4ff; }
 
 /* Extra-small button variant */
@@ -186,3 +215,165 @@ body {
 /* Spinner for upload-in-progress */
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin-icon { animation: spin .8s linear infinite; }
+
+/* ── Gallery grid (form / edit page) ────────────────────────── */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+}
+.gallery-item {
+  position: relative;
+  border: 1px solid #dee2e6;
+  border-radius: .375rem;
+  overflow: hidden;
+  background: #f8f9fa;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gallery-item-new {
+  border-color: #198754;
+  border-style: dashed;
+}
+.gallery-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.gallery-item-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+}
+.gallery-remove-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: rgba(255,255,255,.85);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background .2s;
+}
+.gallery-remove-check:hover {
+  background: #f8d7da;
+}
+.gallery-remove-check input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.gallery-remove-check i {
+  font-size: .75rem;
+  color: #6c757d;
+  transition: color .2s;
+}
+.gallery-remove-check input:checked + i {
+  color: #dc3545;
+}
+.gallery-remove-check:has(input:checked) {
+  background: #f8d7da;
+}
+.gallery-item:has(.gallery-remove-check input:checked) {
+  border-color: #dc3545;
+  opacity: .5;
+}
+.gallery-index {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  font-size: .65rem;
+  background: rgba(0,0,0,.55);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+
+/* ── Gallery count badge on thumbnails ──────────────────────── */
+.gallery-count-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: .65rem;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  background: #0d6efd;
+  color: #fff;
+  border-radius: 9px;
+  padding: 0 4px;
+  z-index: 2;
+}
+
+/* ── Show page gallery grid ─────────────────────────────────── */
+.show-gallery-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.show-gallery-item {
+  position: relative;
+  cursor: zoom-in;
+  transition: transform .2s ease, box-shadow .2s ease;
+  border-radius: .375rem;
+  overflow: hidden;
+}
+.show-gallery-item:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 16px rgba(13, 110, 253, .2);
+}
+.show-gallery-index {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  font-size: .7rem;
+  background: rgba(0,0,0,.55);
+  color: #fff;
+  padding: 1px 8px;
+  border-radius: 3px;
+}
+
+/* ── Lightbox nav arrows ────────────────────────────────────── */
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: rgba(255,255,255,.15);
+  border: none;
+  color: #fff;
+  font-size: 1.5rem;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background .2s, transform .2s;
+}
+.lightbox-nav:hover {
+  background: rgba(255,255,255,.3);
+  transform: translateY(-50%) scale(1.1);
+}
+.lightbox-prev { left: 18px; }
+.lightbox-next { right: 18px; }
+.lightbox-overlay.active .lightbox-nav {
+  display: flex;
+}
+
+/* ── Lightbox counter ───────────────────────────────────────── */
+.lightbox-counter {
+  color: rgba(255,255,255,.85);
+  font-size: .9rem;
+  font-weight: 500;
+  margin-right: 8px;
+}

@@ -14,14 +14,14 @@ class ImportController extends Controller
         $this->columns = require ROOT . '/config/columns.php';
     }
 
-    // ?? Upload form ???????????????????????????????????????????????????????????
+    // ── Upload form ───────────────────────────────────────────────
 
     public function index(): void
     {
         $this->render('import/index', ['columns' => $this->columns]);
     }
 
-    // ?? Process upload ????????????????????????????????????????????????????????
+    // ── Process upload ────────────────────────────────────────────
 
     public function upload(): void
     {
@@ -32,29 +32,25 @@ class ImportController extends Controller
 
         $file = $_FILES['csv_file'] ?? null;
         if (!$file || $file['error'] !== UPLOAD_ERR_OK) {
-            $this->renderWithError('??????????????????? PHP ????: ' . ini_get('upload_max_filesize') . '?');
+            $this->renderWithError('请选择一个有效的 CSV 文件。PHP 限制: ' . ini_get('upload_max_filesize') . '。');
             return;
         }
 
         if (strtolower(pathinfo($file['name'], PATHINFO_EXTENSION)) !== 'csv') {
-            $this->renderWithError('??? .csv ?????');
+            $this->renderWithError('仅支持 .csv 格式文件');
             return;
         }
 
         $encoding = $_POST['encoding'] ?? 'auto';
         $content  = file_get_contents($file['tmp_name']);
+        $content  = $this->toUtf8($content, $encoding);
+        $content  = ltrim($content, "\xEF\xBB\xBF");
 
-        // Convert to UTF-8
-        $content = $this->toUtf8($content, $encoding);
-        // Strip UTF-8 BOM if present
-        $content = ltrim($content, "\xEF\xBB\xBF");
-
-        // Write decoded content to a temp file for fgetcsv
         $tmp = tempnam(sys_get_temp_dir(), 'pdb_');
         file_put_contents($tmp, $content);
 
-        // Pre-process the optional bundled product images.
-        // The map is keyed by TQB code (case-insensitive) -> saved relative path.
+        // Pre-process bundled product images.
+        // The map is keyed by TQB code (case-insensitive) -> array of saved relative paths.
         [$imageMap, $imageErrors, $imageSavedCount, $imageReport]
             = $this->processImages($_FILES['images'] ?? null);
 
@@ -63,17 +59,17 @@ class ImportController extends Controller
 
         @unlink($tmp);
 
-        // Clean up any images that did NOT match a TQB code in the CSV
-        // (they were saved to disk during validation; remove the orphans).
+        // Clean up images that did NOT match any TQB code in the CSV
         $imageUnmatched = [];
-        foreach ($imageMap as $key => $rel) {
+        foreach ($imageMap as $key => $paths) {
             if (!isset($imageMatched[$key])) {
-                ImageHelper::delete($rel);
+                foreach ($paths as $rel) {
+                    ImageHelper::delete($rel);
+                }
                 $imageUnmatched[] = $key;
             }
         }
 
-        // Annotate the per-image report with the final match result.
         foreach ($imageReport as &$row) {
             if (!empty($row['saved']) && isset($row['key'])) {
                 $row['matched'] = isset($imageMatched[$row['key']]);
@@ -95,7 +91,7 @@ class ImportController extends Controller
         ]);
     }
 
-    // ?? Private helpers ???????????????????????????????????????????????????????
+    // ── Private helpers ───────────────────────────────────────────
 
     private function toUtf8(string $content, string $encoding): string
     {
@@ -105,7 +101,7 @@ class ImportController extends Controller
         } elseif (in_array(strtoupper($encoding), ['GBK', 'GB2312'], true)) {
             $from = 'GBK';
         } else {
-            $from = null; // already UTF-8
+            $from = null;
         }
         return $from ? mb_convert_encoding($content, 'UTF-8', $from) : $content;
     }
@@ -115,9 +111,9 @@ class ImportController extends Controller
      * upload directory. Returns:
      *   [map, errors, savedCount, perFileReport]
      * where `map` is keyed by the normalized TQB code derived from the
-     * filename basename (extension stripped, lower-cased, with common
-     * OS-added duplicate / "copy" markers like "(1)", " - Copy", " 副本"
-     * removed so e.g. "TQB3-0001(3).webp" still maps to "tqb3-0001").
+     * filename basename → array of saved relative paths.
+     * Multiple images with the same TQB prefix (e.g. TQB0-001(1).jpg,
+     * TQB0-001(2).jpg) are ALL collected into the same gallery array.
      */
     private function processImages(?array $filesField): array
     {
@@ -126,15 +122,13 @@ class ImportController extends Controller
         $files = ImageHelper::normalizeMulti($filesField);
         if (empty($files)) return [[], [], 0, []];
 
-        $map     = [];
+        $map     = [];  // key => [path1, path2, ...]
         $errors  = [];
         $saved   = 0;
         $report  = [];
 
         foreach ($files as $f) {
             $name = (string)($f['name'] ?? '');
-            // Browsers using <input webkitdirectory> send "subdir/file.jpg";
-            // some legacy browsers send "C:\fakepath\file.jpg" — keep only the basename.
             $base = basename(str_replace('\\', '/', $name));
             $stem = trim(pathinfo($base, PATHINFO_FILENAME));
             $key  = self::normalizeTqbKey($stem);
@@ -164,13 +158,10 @@ class ImportController extends Controller
 
             try {
                 $rel = ImageHelper::save($f, $key, true);
-                // If the same TQB appears twice (e.g. "TQB3-0001.webp" and
-                // "TQB3-0001(2).webp"), the later upload wins; delete the
-                // previous saved file to avoid orphans.
-                if (isset($map[$key])) {
-                    ImageHelper::delete($map[$key]);
+                if (!isset($map[$key])) {
+                    $map[$key] = [];
                 }
-                $map[$key]     = $rel;
+                $map[$key][]    = $rel;
                 $entry['saved'] = true;
                 $entry['path']  = $rel;
                 $saved++;
@@ -202,21 +193,15 @@ class ImportController extends Controller
         $value = mb_strtolower(trim($value));
         if ($value === '') return '';
 
-        // Iteratively strip the trailing duplicate/copy markers so layered
-        // patterns like "foo - copy (2)" collapse correctly.
         $prev = null;
         while ($prev !== $value) {
             $prev = $value;
-            // Trailing " (N)" / "(N)"
             $value = preg_replace('/\s*\(\s*\d+\s*\)\s*$/u', '', $value) ?? $value;
-            // Trailing copy markers: " - copy", " -copy", "_copy", " copy 2",
-            // and Chinese 副本 / 複本 / 拷贝 (optionally with a number).
             $value = preg_replace(
                 '/\s*[-_]?\s*(?:copy|副本|複本|拷贝)\s*\d*\s*$/iu',
                 '',
                 $value
             ) ?? $value;
-            // Trim trailing/leading separators left behind by the strips.
             $value = preg_replace('/^[\s\-_]+|[\s\-_]+$/u', '', $value) ?? $value;
         }
         return $value;
@@ -224,9 +209,9 @@ class ImportController extends Controller
 
     /**
      * Import CSV rows. If $imageMap is non-empty, each row whose TQB code
-     * matches a key in the map gets its `image_path` set to the matched
-     * relative path. The set of matched keys is returned to the caller
-     * so unmatched images can be cleaned up.
+     * matches a key in the map gets its `gallery` set to the matched image
+     * paths (merged with any existing gallery). The set of matched keys is
+     * returned so unmatched images can be cleaned up.
      */
     private function importCsv(string $filePath, array $imageMap = []): array
     {
@@ -244,24 +229,22 @@ class ImportController extends Controller
         $skipped  = 0;
         $errors   = [];
         $successRows  = [];
-        $imageMatched = []; // map-key => true (TQB codes that consumed an image)
-        $imageMissing = []; // TQB codes in CSV that had no matching image
+        $imageMatched = [];
+        $imageMissing = [];
 
         $db = Database::getInstance();
         $db->beginTransaction();
 
         try {
-            set_time_limit(300); // allow up to 5 minutes for large files
+            set_time_limit(300);
 
             while (($row = fgetcsv($handle)) !== false) {
-                // Skip rows that don't match header count
                 if (count($row) < count($headers)) {
                     $row = array_pad($row, count($headers), '');
                 }
                 $csvRow = array_combine($headers, array_slice($row, 0, count($headers)));
                 $data   = Product::fromCsvRow($csvRow, $this->columns);
 
-                // Skip completely empty rows
                 if (empty(array_filter($data, fn($v) => $v !== ''))) {
                     $skipped++;
                     continue;
@@ -270,12 +253,8 @@ class ImportController extends Controller
                 $tqbCode = $data['tqb_code'] ?? '';
                 $newOem  = $data['oem_number'] ?? '';
 
-                // Resolve a possible image for this TQB code. The same
-                // normalization is applied on both sides (image filename and
-                // CSV cell) so that things like trailing whitespace, "(1)"
-                // duplicate markers, or " - Copy" suffixes still match.
-                $imgKey   = self::normalizeTqbKey($tqbCode);
-                $matchRel = ($imgKey !== '' && isset($imageMap[$imgKey])) ? $imageMap[$imgKey] : null;
+                $imgKey    = self::normalizeTqbKey($tqbCode);
+                $matchPaths = ($imgKey !== '' && isset($imageMap[$imgKey])) ? $imageMap[$imgKey] : null;
 
                 if ($tqbCode !== '') {
                     $existing = Product::findByTqbCode($tqbCode);
@@ -285,11 +264,9 @@ class ImportController extends Controller
                         $oemParts    = array_filter(array_map('trim', explode('/', $existingOem)), fn($v) => $v !== '');
                         $newOemParts = array_filter(array_map('trim', explode('/', $newOem)),     fn($v) => $v !== '');
 
-                        // OEM is a subset of what's already stored AND there's no
-                        // new image to attach -> safe to skip this row entirely.
                         $isSubset = empty(array_diff($newOemParts, $oemParts));
 
-                        if ($isSubset && $matchRel === null) {
+                        if ($isSubset && $matchPaths === null) {
                             $skipped++;
                             if (!empty($imageMap) && $imgKey !== '' && !isset($imageMap[$imgKey])) {
                                 $imageMissing[$tqbCode] = true;
@@ -301,14 +278,14 @@ class ImportController extends Controller
                             $mergedOem = array_unique(array_merge($oemParts, $newOemParts));
                             $data['oem_number'] = implode('/', $mergedOem);
                         } else {
-                            // Avoid wiping the merged-OEM with a strict-subset value.
                             $data['oem_number'] = $existingOem;
                         }
 
-                        if ($matchRel !== null) {
-                            // Replace any pre-existing image with the new one.
-                            ImageHelper::delete($existing['image_path'] ?? null);
-                            $data['image_path'] = $matchRel;
+                        if ($matchPaths !== null) {
+                            // Merge new images into the existing gallery
+                            $existingGallery = Product::parseGallery($existing['gallery'] ?? null);
+                            $mergedGallery = array_merge($existingGallery, $matchPaths);
+                            $data['gallery'] = Product::galleryJson($mergedGallery);
                             $imageMatched[$imgKey] = true;
                         }
 
@@ -320,7 +297,7 @@ class ImportController extends Controller
                             $skipped++;
                         }
 
-                        if (!empty($imageMap) && $imgKey !== '' && $matchRel === null) {
+                        if (!empty($imageMap) && $imgKey !== '' && $matchPaths === null) {
                             $imageMissing[$tqbCode] = true;
                         }
                         continue;
@@ -328,8 +305,8 @@ class ImportController extends Controller
                 }
 
                 // New product
-                if ($matchRel !== null) {
-                    $data['image_path'] = $matchRel;
+                if ($matchPaths !== null) {
+                    $data['gallery'] = Product::galleryJson($matchPaths);
                     $imageMatched[$imgKey] = true;
                 } elseif (!empty($imageMap) && $tqbCode !== '') {
                     $imageMissing[$tqbCode] = true;

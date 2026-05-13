@@ -24,12 +24,12 @@
         </div>
         <?php if (isset($imageSavedCount) && ((int)$imageSavedCount > 0 || !empty($imageReport))): ?>
         <div class="alert alert-info py-2 small">
-          <i class="bi bi-image me-1"></i>
-          图片处理：上传 <strong><?= (int)$imageSavedCount ?></strong> 张，成功匹配并关联到产品 <strong><?= (int)($imageMatchCount ?? 0) ?></strong> 张
+          <i class="bi bi-images me-1"></i>
+          图片处理：上传 <strong><?= (int)$imageSavedCount ?></strong> 张，成功匹配并关联到产品 <strong><?= (int)($imageMatchCount ?? 0) ?></strong> 个产品的图片库
           <?php if (!empty($imageUnmatched)): ?>
             <div class="text-danger mt-1">
               <i class="bi bi-exclamation-triangle me-1"></i>
-              <strong><?= count($imageUnmatched) ?></strong> 张图片已上传但未在 CSV 中找到对应的 TQB 编码（已自动清理）：
+              <strong><?= count($imageUnmatched) ?></strong> 个 TQB 编码的图片已上传但未在 CSV 中找到对应产品（已自动清理）：
               <code><?= e(implode(', ', array_slice($imageUnmatched, 0, 30))) ?><?= count($imageUnmatched) > 30 ? ' …' : '' ?></code>
             </div>
           <?php endif; ?>
@@ -50,7 +50,7 @@
                         <?php if (!empty($r['error'])): ?>
                           <span class="text-danger">跳过：<?= e($r['error']) ?></span>
                         <?php elseif (!empty($r['matched'])): ?>
-                          <span class="text-success"><i class="bi bi-check-circle me-1"></i>已关联</span>
+                          <span class="text-success"><i class="bi bi-check-circle me-1"></i>已关联到图片库</span>
                         <?php elseif (!empty($r['saved'])): ?>
                           <span class="text-warning">已上传但 CSV 无此 TQB 编码（已清理）</span>
                         <?php else: ?>
@@ -102,13 +102,14 @@
 
           <div class="mb-3 border-top pt-3">
             <label class="form-label fw-medium">
-              <i class="bi bi-images text-primary me-1"></i>产品图片（可选）
+              <i class="bi bi-images text-primary me-1"></i>产品图片（可选，支持多图）
             </label>
             <input type="file" class="form-control" name="images[]" id="imagesInput"
                    accept="image/*" multiple>
             <div class="form-text small">
-              在文件选择器里选择图片所在的 <strong>images 文件夹中的全部图片</strong>，文件名需与 CSV 中的
-              <strong>TQB编码</strong> 一致（例如 <code>TQB0-0002.jpg</code>），后缀支持 jpg / png / gif / webp。
+              选择图片文件，文件名需以 <strong>TQB编码</strong> 开头。
+              同一个 TQB编码 的多张图片（如 <code>TQB0-001(1).jpg</code>、<code>TQB0-001(2).jpg</code>、<code>TQB0-001(3).jpg</code>）
+              会自动合并到该产品的<strong>图片库</strong>中。后缀支持 jpg / png / gif / webp。
             </div>
             <div class="form-check mt-2">
               <input class="form-check-input" type="checkbox" id="useFolderPicker">
@@ -165,12 +166,13 @@
       <li>如果 <strong>TQB编码</strong> 和 <strong>OEM号码</strong> 均与数据库中完全一致，且未上传同名图片，将自动跳过此行</li>
       <li>如果存在相同的 TQB编码 但 OEM号码 不同，将自动合并新的 OEM号码，并用新数据覆盖该产品的其他字段</li>
       <li>Excel 默认保存的 .csv 通常为 GBK 编码，选"自动检测"或"GBK"即可</li>
-      <li><strong>产品图片：</strong>将 CSV 同目录下的 <code>images/</code> 文件夹中所有图片一并上传，文件名需为该行的
-        <strong>TQB编码</strong>（不区分大小写），如 <code>TQB0-0002.jpg</code>。系统会自动把图片关联到对应产品；
-        若浏览器/Windows 在重复下载时自动追加了 <code>(1)</code>、<code>(2)</code>、<code> - Copy</code>、<code> - 副本</code>
-        等后缀（如 <code>TQB3-0001(3).webp</code>），系统会自动剥离这些后缀再匹配。
-        未匹配到任何 TQB 的图片会被丢弃，并在导入结果中列出。</li>
-      <li>若需彻底清空所有数据，请在“产品列表”页点击右上角的“清空数据”按钮</li>
+      <li><strong>产品图片（多图支持）：</strong>图片文件名需以该产品的
+        <strong>TQB编码</strong> 开头（不区分大小写）。同一个 TQB编码 的多张图片会<strong>全部添加到产品的图片库</strong>中，
+        例如 <code>TQB0-001.jpg</code>、<code>TQB0-001(1).jpg</code>、<code>TQB0-001(2).jpg</code> 三张图片
+        都会被关联到 TQB编码为 <code>TQB0-001</code> 的产品。
+        浏览器/Windows 自动追加的 <code>(1)</code>、<code>(2)</code>、<code> - Copy</code>、<code> - 副本</code>
+        等后缀会被自动剥离后用于匹配。未匹配到任何 TQB 的图片会被丢弃，并在导入结果中列出。</li>
+      <li>若需彻底清空所有数据，请在"产品列表"页点击右上角的"清空数据"按钮</li>
     </ul>
   </div>
 </div>
@@ -230,13 +232,21 @@
         </thead>
         <tbody>
           <?php foreach (array_reverse($successRows) as $sRow): ?>
-          <?php $sImg = trim((string)($sRow['image_path'] ?? '')); ?>
+          <?php
+            $sGallery = Product::parseGallery($sRow['gallery'] ?? null);
+            $sThumb = !empty($sGallery) ? ($imgBase . '/' . ltrim($sGallery[0], '/')) : '';
+          ?>
           <tr>
             <td>
-              <?php if ($sImg !== ''): ?>
-                <img src="<?= e($imgBase . '/' . ltrim($sImg, '/')) ?>"
-                     alt="" class="rounded border"
-                     style="width:36px;height:36px;object-fit:cover;">
+              <?php if ($sThumb !== ''): ?>
+                <div class="position-relative d-inline-block">
+                  <img src="<?= e($sThumb) ?>"
+                       alt="" class="rounded border"
+                       style="width:36px;height:36px;object-fit:cover;">
+                  <?php if (count($sGallery) > 1): ?>
+                    <span class="gallery-count-badge" style="font-size:.6rem;width:16px;height:16px;"><?= count($sGallery) ?></span>
+                  <?php endif; ?>
+                </div>
               <?php else: ?>
                 <span class="text-muted">—</span>
               <?php endif; ?>

@@ -1,20 +1,13 @@
 <?php
-// Build export URL preserving current filters and search
 $exportUrl = '?' . http_build_query(array_merge(
     ['c' => 'product', 'a' => 'export'],
     empty($filters) ? [] : ['f' => $filters],
     empty($q) ? [] : ['q' => $q]
 ));
 
-// Columns shown in table
 $listCols = array_values(array_filter($columns, fn($c) => $c['list']));
-// Filterable columns
 $filterCols = array_values(array_filter($columns, fn($c) => $c['filterable']));
-
-// Current filter count
 $activeFilters = count(array_filter($filters ?? [], fn($v) => trim((string)$v) !== ''));
-
-// Base URL for product image thumbnails
 $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
 ?>
 
@@ -82,7 +75,6 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
         <input type="hidden" name="q" value="<?= e($q) ?>">
         <?php endif; ?>
         <div class="row g-2">
-          <!-- Category Filter -->
           <div class="col-md-3 col-sm-4 col-6">
             <label class="form-label form-label-sm mb-1">所属分类</label>
             <select name="f[category_id]" class="form-select form-select-sm">
@@ -94,7 +86,6 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
               <?php endforeach; ?>
             </select>
           </div>
-
           <?php foreach ($filterCols as $col): ?>
           <div class="col-md-3 col-sm-4 col-6">
             <label class="form-label form-label-sm mb-1"><?= e($col['label']) ?></label>
@@ -128,7 +119,7 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
           <th>图片</th>
           <th>分类</th>
           <?php foreach ($listCols as $col): ?>
-          <th><?= e($col['label']) ?></th>
+          <th class="<?= $col['field'] === 'oem_number' ? 'oem-number-col' : ($col['field'] === 'car_model' ? 'car-model-col' : '') ?>"><?= e($col['label']) ?></th>
           <?php endforeach; ?>
           <th class="text-end pe-3">操作</th>
         </tr>
@@ -142,18 +133,32 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
         </tr>
         <?php else: ?>
         <?php foreach ($rows as $row): ?>
+        <?php
+          $gallery = Product::parseGallery($row['gallery'] ?? null);
+          $thumbUrl = '';
+          $galleryCount = count($gallery);
+          if ($galleryCount > 0) {
+              $thumbUrl = $imgBase . '/' . ltrim($gallery[0], '/');
+          }
+          $galleryUrls = array_map(fn($p) => $imgBase . '/' . ltrim($p, '/'), $gallery);
+        ?>
         <tr>
           <td class="ps-3 text-muted small"><?= e($row['id']) ?></td>
           <td>
-            <?php $thumb = trim((string)($row['image_path'] ?? '')); ?>
-            <?php if ($thumb !== ''): ?>
-              <img src="<?= e($imgBase . '/' . ltrim($thumb, '/')) ?>"
-                   alt="<?= e($row['name'] ?? '') ?>"
-                   class="product-thumb rounded border lightbox-trigger"
-                   style="width:48px;height:48px;object-fit:cover;cursor:zoom-in;"
-                   data-full="<?= e($imgBase . '/' . ltrim($thumb, '/')) ?>"
-                   data-caption="<?= e(($row['tqb_code'] ?? '') . ' – ' . ($row['name'] ?? '')) ?>"
-                   title="点击查看大图">
+            <?php if ($thumbUrl !== ''): ?>
+              <div class="position-relative d-inline-block">
+                <img src="<?= e($thumbUrl) ?>"
+                     alt="<?= e($row['name'] ?? '') ?>"
+                     class="product-thumb rounded border lightbox-trigger"
+                     style="width:48px;height:48px;object-fit:cover;cursor:zoom-in;"
+                     data-gallery='<?= e(json_encode($galleryUrls, JSON_UNESCAPED_SLASHES)) ?>'
+                     data-gallery-index="0"
+                     data-caption="<?= e(($row['tqb_code'] ?? '') . ' – ' . ($row['name'] ?? '')) ?>"
+                     title="点击查看大图">
+                <?php if ($galleryCount > 1): ?>
+                  <span class="gallery-count-badge"><?= $galleryCount ?></span>
+                <?php endif; ?>
+              </div>
             <?php else: ?>
               <label class="quick-upload-trigger d-inline-flex align-items-center justify-content-center rounded border bg-light"
                      style="width:48px;height:48px;cursor:pointer;margin:0;"
@@ -161,7 +166,7 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
                      data-id="<?= (int)$row['id'] ?>"
                      data-caption="<?= e(($row['tqb_code'] ?? '') . ' – ' . ($row['name'] ?? '')) ?>">
                 <i class="bi bi-image opacity-50"></i>
-                <input type="file" accept="image/*" class="d-none quick-upload-input">
+                <input type="file" accept="image/*" multiple class="d-none quick-upload-input">
               </label>
             <?php endif; ?>
           </td>
@@ -173,7 +178,7 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
             <?php endif; ?>
           </td>
           <?php foreach ($listCols as $col): ?>
-          <td><?php
+          <td class="<?= $col['field'] === 'oem_number' ? 'oem-number-col' : ($col['field'] === 'car_model' ? 'car-model-col' : '') ?>"><?php
             $val = $row[$col['field']] ?? '';
             if ($col['field'] === 'stock_status' && $val !== '') {
                 $cls = match($val) {
@@ -186,6 +191,10 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
             } elseif ($col['field'] === 'warehouse_a' && $val !== '') {
                 $cls = $val === '可出' ? 'success' : 'secondary';
                 echo '<span class="badge bg-' . $cls . '">' . e($val) . '</span>';
+            } elseif ($col['field'] === 'oem_number' && $val !== '') {
+                echo '<span class="long-text-cell" title="' . e($val) . '">' . e($val) . '</span>';
+            } elseif ($col['field'] === 'car_model' && $val !== '') {
+                echo '<span class="long-text-cell long-text-cell--sm" title="' . e($val) . '">' . e($val) . '</span>';
             } else {
                 echo e($val);
             }
@@ -252,44 +261,90 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
   <?php endif; ?>
 </div>
 
-<!-- ── Lightbox overlay ───────────────────────────────────────── -->
+<!-- ── Lightbox overlay with gallery navigation ─────────────── -->
 <div id="imgLightbox" class="lightbox-overlay" aria-hidden="true">
   <div class="lightbox-toolbar">
+    <span id="lightboxCounter" class="lightbox-counter"></span>
     <a id="lightboxDownload" class="lightbox-btn" href="#" download title="下载图片">
       <i class="bi bi-download"></i>
     </a>
     <button type="button" class="lightbox-btn lightbox-close" aria-label="关闭" title="关闭">&times;</button>
   </div>
+  <button type="button" class="lightbox-nav lightbox-prev" aria-label="上一张" title="上一张">
+    <i class="bi bi-chevron-left"></i>
+  </button>
   <div class="lightbox-body">
     <img id="lightboxImg" class="lightbox-img" src="" alt="">
     <div id="lightboxCaption" class="lightbox-caption"></div>
   </div>
+  <button type="button" class="lightbox-nav lightbox-next" aria-label="下一张" title="下一张">
+    <i class="bi bi-chevron-right"></i>
+  </button>
 </div>
 
 <script>
 (function(){
-  const overlay  = document.getElementById('imgLightbox');
-  const lbImg    = document.getElementById('lightboxImg');
-  const lbCap    = document.getElementById('lightboxCaption');
-  const dlBtn    = document.getElementById('lightboxDownload');
-  const closeBtn = overlay.querySelector('.lightbox-close');
+  var overlay  = document.getElementById('imgLightbox');
+  var lbImg    = document.getElementById('lightboxImg');
+  var lbCap    = document.getElementById('lightboxCaption');
+  var dlBtn    = document.getElementById('lightboxDownload');
+  var counter  = document.getElementById('lightboxCounter');
+  var closeBtn = overlay.querySelector('.lightbox-close');
+  var prevBtn  = overlay.querySelector('.lightbox-prev');
+  var nextBtn  = overlay.querySelector('.lightbox-next');
 
-  /* Open */
-  document.querySelectorAll('.lightbox-trigger').forEach(function(thumb){
-    thumb.addEventListener('click', function(){
-      var imgUrl = thumb.dataset.full || thumb.src;
-      lbImg.src = imgUrl;
-      lbCap.textContent = thumb.dataset.caption || '';
-      dlBtn.href = imgUrl;
-      dlBtn.download = imgUrl.split('/').pop() || 'product-image';
-      overlay.classList.add('active');
-      overlay.setAttribute('aria-hidden','false');
-      document.body.style.overflow = 'hidden';
+  var currentGallery = [];
+  var currentIndex   = 0;
+  var currentCaption = '';
+
+  function showImage(index) {
+    if (index < 0 || index >= currentGallery.length) return;
+    currentIndex = index;
+    var url = currentGallery[index];
+    lbImg.src = url;
+    dlBtn.href = url;
+    dlBtn.download = url.split('/').pop() || 'product-image';
+    lbCap.textContent = currentCaption;
+    if (currentGallery.length > 1) {
+      counter.textContent = (index + 1) + ' / ' + currentGallery.length;
+      prevBtn.style.display = index > 0 ? '' : 'none';
+      nextBtn.style.display = index < currentGallery.length - 1 ? '' : 'none';
+    } else {
+      counter.textContent = '';
+      prevBtn.style.display = 'none';
+      nextBtn.style.display = 'none';
+    }
+  }
+
+  function openLightbox(gallery, index, caption) {
+    currentGallery = gallery;
+    currentCaption = caption;
+    showImage(index || 0);
+    overlay.classList.add('active');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLightbox() {
+    overlay.classList.remove('active');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    setTimeout(function(){ lbImg.src = ''; }, 300);
+  }
+
+  document.querySelectorAll('.lightbox-trigger').forEach(function(thumb) {
+    thumb.addEventListener('click', function() {
+      var galleryData = thumb.dataset.gallery;
+      var gallery = galleryData ? JSON.parse(galleryData) : [thumb.dataset.full || thumb.src];
+      var index = parseInt(thumb.dataset.galleryIndex || '0', 10);
+      openLightbox(gallery, index, thumb.dataset.caption || '');
     });
   });
 
-  /* Download via fetch to force save-as (avoids browser inline preview) */
-  dlBtn.addEventListener('click', function(e){
+  prevBtn.addEventListener('click', function() { showImage(currentIndex - 1); });
+  nextBtn.addEventListener('click', function() { showImage(currentIndex + 1); });
+
+  dlBtn.addEventListener('click', function(e) {
     e.preventDefault();
     var url = dlBtn.href;
     var filename = dlBtn.download || 'product-image';
@@ -304,55 +359,33 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
     });
   });
 
-  /* Close helpers */
-  function closeLightbox(){
-    overlay.classList.remove('active');
-    overlay.setAttribute('aria-hidden','true');
-    document.body.style.overflow = '';
-    setTimeout(function(){ lbImg.src = ''; }, 300); // clear after transition
-  }
-
   closeBtn.addEventListener('click', closeLightbox);
-  overlay.addEventListener('click', function(e){
+  overlay.addEventListener('click', function(e) {
     if (e.target === overlay || e.target.classList.contains('lightbox-body')) closeLightbox();
   });
-  document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape' && overlay.classList.contains('active')) closeLightbox();
+  document.addEventListener('keydown', function(e) {
+    if (!overlay.classList.contains('active')) return;
+    if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'ArrowLeft')  showImage(currentIndex - 1);
+    if (e.key === 'ArrowRight') showImage(currentIndex + 1);
   });
+
+  window._openLightbox = openLightbox;
 })();
 </script>
 
 <script>
 /* ── Quick upload from product list ─────────────────────────── */
 (function(){
-  function bindLightbox(img) {
-    var overlay = document.getElementById('imgLightbox');
-    var lbImg   = document.getElementById('lightboxImg');
-    var lbCap   = document.getElementById('lightboxCaption');
-    var dlBtn   = document.getElementById('lightboxDownload');
-    img.addEventListener('click', function(){
-      var imgUrl = img.dataset.full || img.src;
-      lbImg.src = imgUrl;
-      lbCap.textContent = img.dataset.caption || '';
-      dlBtn.href = imgUrl;
-      dlBtn.download = imgUrl.split('/').pop() || 'product-image';
-      overlay.classList.add('active');
-      overlay.setAttribute('aria-hidden','false');
-      document.body.style.overflow = 'hidden';
-    });
-  }
-
   document.querySelectorAll('.quick-upload-input').forEach(function(input){
     input.addEventListener('change', function(){
-      if (!input.files || !input.files[0]) return;
+      if (!input.files || !input.files.length) return;
 
       var label   = input.closest('.quick-upload-trigger');
       var id      = label.dataset.id;
       var caption = label.dataset.caption || '';
       var td      = label.parentElement;
-      var file    = input.files[0];
 
-      /* Show spinner */
       var icon = label.querySelector('i');
       icon.className = 'bi bi-arrow-repeat spin-icon';
       icon.style.opacity = '1';
@@ -361,24 +394,38 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
       var csrfToken = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
       var fd = new FormData();
       fd.append('id', id);
-      fd.append('image', file);
       fd.append('_token', csrfToken);
+      for (var i = 0; i < input.files.length; i++) {
+        fd.append('images[]', input.files[i]);
+      }
 
       fetch('?c=product&a=uploadImage', { method: 'POST', body: fd })
         .then(function(r){ return r.json(); })
         .then(function(data){
           if (data.ok) {
-            /* Replace placeholder with real thumbnail */
+            var wrap = document.createElement('div');
+            wrap.className = 'position-relative d-inline-block';
             var img = document.createElement('img');
             img.src = data.url;
             img.alt = caption;
             img.className = 'product-thumb rounded border lightbox-trigger';
             img.style.cssText = 'width:48px;height:48px;object-fit:cover;cursor:zoom-in;';
-            img.dataset.full = data.url;
+            img.dataset.gallery = JSON.stringify(data.gallery || [data.url]);
+            img.dataset.galleryIndex = '0';
             img.dataset.caption = caption;
             img.title = '点击查看大图';
-            td.replaceChild(img, label);
-            bindLightbox(img);
+            wrap.appendChild(img);
+            if (data.gallery && data.gallery.length > 1) {
+              var badge = document.createElement('span');
+              badge.className = 'gallery-count-badge';
+              badge.textContent = data.gallery.length;
+              wrap.appendChild(badge);
+            }
+            td.replaceChild(wrap, label);
+            img.addEventListener('click', function(){
+              var g = JSON.parse(img.dataset.gallery);
+              window._openLightbox(g, 0, caption);
+            });
           } else {
             alert(data.error || '上传失败');
             icon.className = 'bi bi-image opacity-50';
