@@ -9,6 +9,25 @@ $listCols = array_values(array_filter($columns, fn($c) => $c['list']));
 $filterCols = array_values(array_filter($columns, fn($c) => $c['filterable']));
 $activeFilters = count(array_filter($filters ?? [], fn($v) => trim((string)$v) !== ''));
 $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
+
+$sort = $sort ?? 'updated_at';
+$order = $order ?? 'DESC';
+
+$getSortUrl = function($field) use ($filters, $q, $sort, $order) {
+    $newOrder = ($sort === $field && $order === 'ASC') ? 'DESC' : 'ASC';
+    return '?' . http_build_query(array_merge(
+        ['c' => 'product', 'a' => 'index', 'sort' => $field, 'order' => $newOrder],
+        !empty($filters) ? ['f' => $filters] : [],
+        !empty($q) ? ['q' => $q] : []
+    ));
+};
+
+$getSortIcon = function($field) use ($sort, $order) {
+    if ($sort !== $field) return '<i class="bi bi-arrow-down-up ms-1 opacity-25 small"></i>';
+    return $order === 'ASC' 
+        ? '<i class="bi bi-sort-up ms-1 text-primary"></i>' 
+        : '<i class="bi bi-sort-down ms-1 text-primary"></i>';
+};
 ?>
 
 <!-- ── Page header ──────────────────────────────────────────────── -->
@@ -42,6 +61,8 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
       <?php foreach ($filters as $k => $v): if (trim((string)$v) !== ''): ?>
         <input type="hidden" name="f[<?= e($k) ?>]" value="<?= e($v) ?>">
       <?php endif; endforeach; ?>
+      <input type="hidden" name="sort" value="<?= e($sort) ?>">
+      <input type="hidden" name="order" value="<?= e($order) ?>">
       <div class="input-group">
         <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
         <input type="text" name="q" class="form-control border-start-0 ps-0" placeholder="全局搜索 (可搜索任何字段)..." value="<?= e($q ?? '') ?>">
@@ -74,6 +95,8 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
         <?php if (!empty($q)): ?>
         <input type="hidden" name="q" value="<?= e($q) ?>">
         <?php endif; ?>
+        <input type="hidden" name="sort" value="<?= e($sort) ?>">
+        <input type="hidden" name="order" value="<?= e($order) ?>">
         <div class="row g-2">
           <div class="col-md-3 col-sm-4 col-6">
             <label class="form-label form-label-sm mb-1">所属分类</label>
@@ -119,8 +142,25 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
           <th>图片</th>
           <th>分类</th>
           <?php foreach ($listCols as $col): ?>
-          <th class="<?= $col['field'] === 'oem_number' ? 'oem-number-col' : ($col['field'] === 'car_model' ? 'car-model-col' : '') ?>"><?= e($col['label']) ?></th>
+            <?php 
+              $isSortable = in_array($col['field'], ['tqb_code', 'car_series']);
+              $headerClass = $col['field'] === 'oem_number' ? 'oem-number-col' : ($col['field'] === 'car_model' ? 'car-model-col' : '');
+            ?>
+            <th class="<?= $headerClass ?>">
+              <?php if ($isSortable): ?>
+                <a href="<?= $getSortUrl($col['field']) ?>" class="text-decoration-none text-dark d-flex align-items-center">
+                  <?= e($col['label']) ?> <?= $getSortIcon($col['field']) ?>
+                </a>
+              <?php else: ?>
+                <?= e($col['label']) ?>
+              <?php endif; ?>
+            </th>
           <?php endforeach; ?>
+          <th>
+            <a href="<?= $getSortUrl('updated_at') ?>" class="text-decoration-none text-dark d-flex align-items-center">
+              更新时间 <?= $getSortIcon('updated_at') ?>
+            </a>
+          </th>
           <th class="text-end pe-3">操作</th>
         </tr>
       </thead>
@@ -200,6 +240,7 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
             }
           ?></td>
           <?php endforeach; ?>
+          <td class="text-muted small"><?= date('Y-m-d H:i', strtotime($row['updated_at'])) ?></td>
           <td class="text-end pe-3 text-nowrap">
             <a href="?c=product&a=show&id=<?= $row['id'] ?>" class="btn btn-xs btn-outline-secondary" title="查看">
               <i class="bi bi-eye"></i>
@@ -235,6 +276,8 @@ $imgBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
         $baseParams = ['c' => 'product', 'a' => 'index'];
         if (!empty($filters)) $baseParams['f'] = $filters;
         if (!empty($q)) $baseParams['q'] = $q;
+        $baseParams['sort'] = $sort;
+        $baseParams['order'] = $order;
         $prevDisabled = $page <= 1;
         $nextDisabled = $page >= $totalPages;
         ?>

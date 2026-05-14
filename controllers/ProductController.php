@@ -22,7 +22,15 @@ class ProductController extends Controller
         $filters = $_GET['f'] ?? [];
         $q       = trim($_GET['q'] ?? '');
         $page    = max(1, (int) ($_GET['page'] ?? 1));
-        $result  = Product::search($filters, $page, 50, $q);
+        
+        $sort  = $_GET['sort'] ?? 'updated_at';
+        $orderDir = strtoupper($_GET['order'] ?? 'DESC') === 'ASC' ? 'ASC' : 'DESC';
+        $order = [$sort => $orderDir];
+        if ($sort !== 'id') {
+            $order['id'] = 'DESC';
+        }
+
+        $result  = Product::search($filters, $page, 50, $q, $order);
 
         $this->render('products/index', [
             'columns'    => $this->columns,
@@ -34,6 +42,8 @@ class ProductController extends Controller
             'page'       => $result['page'],
             'perPage'    => $result['perPage'],
             'totalPages' => $result['totalPages'],
+            'sort'       => $sort,
+            'order'      => $orderDir,
         ]);
     }
 

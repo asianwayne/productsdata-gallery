@@ -51,7 +51,7 @@ class Product extends Model
         return $stmt->fetch() ?: null;
     }
 
-    public static function search(array $filters, int $page = 1, int $perPage = 50, string $globalSearch = ''): array
+    public static function search(array $filters, int $page = 1, int $perPage = 50, string $globalSearch = '', array $order = ['updated_at' => 'DESC', 'id' => 'DESC']): array
     {
         $clean = array_filter(
             $filters,
@@ -63,7 +63,7 @@ class Product extends Model
         $offset     = ($page - 1) * $perPage;
         $rows       = static::all(
             $clean,
-            ['updated_at' => 'DESC', 'id' => 'DESC'],
+            $order,
             $perPage,
             $offset,
             $globalSearch
